@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
@@ -16,14 +17,19 @@ const (
 )
 
 type Book struct {
-	Author    string `json:"author"`
-	Title     string `json:"title"`
-	URL       string `json:"url"`
-	Pages     string `json:"pages"`
-	Size      string `json:"size"`
-	Language  string `json:"language"`
-	Category  string `json:"category"`
-	Extension string `json:"extension"`
+	Authors   []string `json:"authors"`
+	Title     string   `json:"title"`
+	Series    string   `json:"series,omitempty"`
+	Edition   string   `json:"edition,omitempty"`
+	ISBNs     []string `json:"isbns,omitempty"`
+	URL       string   `json:"url"`
+	Publisher string   `json:"publisher"`
+	Year      string   `json:"year"`
+	Pages     string   `json:"pages"`
+	Size      string   `json:"size"`
+	Language  string   `json:"language"`
+	Category  string   `json:"category"`
+	Extension string   `json:"extension"`
 }
 
 type DownloadInfo struct {
@@ -36,29 +42,124 @@ type DownloadInfo struct {
 	Thumbnail   string `json:"thumbnail"`
 }
 
-// extractBookInfo extracts book information from a goquery.Selection
 func extractBookInfo(s *goquery.Selection) Book {
-	return Book{
-		Author:    strings.Replace(s.Find("a").First().Text(), "´", "", -1),
-		Title:     s.Find("td[width='500']").Find("a").Text(),
-		URL:       getLinks(s),
-		Pages:     strings.Split(s.Find("td").Eq(5).Text(), "[")[0],
-		Size:      s.Find("td").Eq(7).Text(),
-		Language:  s.Find("td").Eq(6).Text(),
-		Category:  "main",
-		Extension: s.Find("td").Eq(8).Text(),
+	book := Book{
+		Category: "main",
+		ISBNs:    []string{},
 	}
+
+	// Extract authors
+	s.Find("td").Eq(1).Find("a").Each(func(i int, s *goquery.Selection) {
+		book.Authors = append(book.Authors, strings.TrimSpace(s.Text()))
+	})
+
+	// Extract title, series, edition, and ISBNs
+	titleCell := s.Find("td[width='500']")
+	titleLink := titleCell.Find("a")
+	book.Title = titleLink.Text()
+
+	// Extract series if present
+	seriesFont := titleCell.Find("font[face='Times'][color='green']").First()
+	if seriesFont.Length() > 0 && !strings.Contains(seriesFont.Text(), "ISBN") {
+		book.Series = seriesFont.Text()
+	}
+
+	// Extract edition if present
+	editionFont := titleCell.Find("font[face='Times'][color='green']").Eq(1)
+	if editionFont.Length() > 0 && !strings.Contains(editionFont.Text(), "ISBN") {
+		book.Edition = editionFont.Text()
+	}
+
+	// Extract ISBNs
+	isbnText := titleCell.Find("font[face='Times'][color='green']").Last().Text()
+	book.ISBNs = extractISBNs(isbnText)
+
+	// Extract other information
+	book.URL = getLinks(s)
+	book.Publisher = strings.TrimSpace(s.Find("td").Eq(3).Text())
+	book.Year = strings.TrimSpace(s.Find("td").Eq(4).Text())
+	book.Pages = strings.Split(s.Find("td").Eq(5).Text(), "[")[0]
+	book.Language = s.Find("td").Eq(6).Text()
+	book.Size = s.Find("td").Eq(7).Text()
+	book.Extension = s.Find("td").Eq(8).Text()
+
+	return book
 }
 
-// getLinks extracts the download link from a goquery.Selection
 func getLinks(s *goquery.Selection) string {
-	href, _ := s.Find("a").FilterFunction(func(i int, s *goquery.Selection) bool {
+	href, _ := s.Find("td a").FilterFunction(func(i int, s *goquery.Selection) bool {
 		return s.Text() == "[1]"
 	}).Attr("href")
 	return href
 }
 
-// searchEbook performs a search for ebooks and returns a slice of Book structs
+func extractISBNs(text string) []string {
+	isbns := []string{}
+	for _, item := range strings.Split(text, ", ") {
+		if isISBN(item) {
+			isbns = append(isbns, item)
+		}
+	}
+	return isbns
+}
+
+func isISBN(s string) bool {
+	// Remove any hyphens or spaces
+	s = strings.ReplaceAll(s, "-", "")
+	s = strings.ReplaceAll(s, " ", "")
+
+	// Check if it's a valid ISBN-10 or ISBN-13
+	return isISBN10(s) || isISBN13(s)
+}
+
+func isISBN10(s string) bool {
+	if len(s) != 10 {
+		return false
+	}
+	sum := 0
+	for i := 0; i < 9; i++ {
+		digit, err := strconv.Atoi(string(s[i]))
+		if err != nil {
+			return false
+		}
+		sum += digit * (10 - i)
+	}
+	last := s[9]
+	if last == 'X' {
+		sum += 10
+	} else {
+		digit, err := strconv.Atoi(string(last))
+		if err != nil {
+			return false
+		}
+		sum += digit
+	}
+	return sum%11 == 0
+}
+
+func isISBN13(s string) bool {
+	if len(s) != 13 {
+		return false
+	}
+	sum := 0
+	for i := 0; i < 12; i++ {
+		digit, err := strconv.Atoi(string(s[i]))
+		if err != nil {
+			return false
+		}
+		if i%2 == 0 {
+			sum += digit
+		} else {
+			sum += digit * 3
+		}
+	}
+	check, err := strconv.Atoi(string(s[12]))
+	if err != nil {
+		return false
+	}
+	return (10-(sum%10))%10 == check
+}
+
 func searchEbook(name, page string) ([]Book, error) {
 	url := fmt.Sprintf("%ssearch.php?req=%s&page=%s", LIBGEN_URL, strings.ReplaceAll(name, " ", "+"), page)
 
@@ -83,7 +184,6 @@ func searchEbook(name, page string) ([]Book, error) {
 	return results, nil
 }
 
-// getDownload retrieves download information for a given ebook URL
 func getDownload(url string) (*DownloadInfo, error) {
 	if url == "" {
 		return nil, fmt.Errorf("empty URL provided")
@@ -112,14 +212,12 @@ func getDownload(url string) (*DownloadInfo, error) {
 	return info, nil
 }
 
-// extractDescription extracts and cleans up the book description
 func extractDescription(doc *goquery.Document) string {
 	desc := doc.Find("div").Last().Text()
 	desc = strings.TrimSpace(strings.Replace(desc, "Description:", "", -1))
 	return strings.Replace(desc, "View a table of contents below:", "", -1)
 }
 
-// extractTitle extracts the book title, falling back to textarea content if necessary
 func extractTitle(doc *goquery.Document) string {
 	title := doc.Find("h1").Text()
 	if title == "" {
@@ -146,7 +244,6 @@ func main() {
 	r.Run(":8080")
 }
 
-// handleSearch handles the /search endpoint
 func handleSearch(c *gin.Context) {
 	searchTerm := c.Query("ebook")
 	page := c.DefaultQuery("page", "1")
@@ -159,7 +256,6 @@ func handleSearch(c *gin.Context) {
 	c.JSON(http.StatusOK, results)
 }
 
-// handleDownload handles the /download endpoint
 func handleDownload(c *gin.Context) {
 	ebookURL := c.Query("ebook")
 	result, err := getDownload(ebookURL)

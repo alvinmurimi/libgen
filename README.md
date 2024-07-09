@@ -1,4 +1,4 @@
-# LibGen Ebook Downloader
+# LibGen API
 
 This repository contains a Go script that allows you to search for and download ebooks from Library Genesis.
 
@@ -38,15 +38,42 @@ go run main.go
 
 This will start a server at http://localhost:8080.
 
+## Running as a microservice
+To run the application as a microservice, build and deploy it to your preferred cloud or container platform. Below are basic steps using Docker:
+
+1. **Build the image:**
+```bash
+docker build -t libgen .
+```
+
+2. **Run the image:**
+```bash
+docker run -p 8080:8080 libgen
+```
+Replace `-p 8080:8080` with your preferred port mapping.
+
+
 ### Endpoints
 
 The script exposes the following endpoints:
 
-**Search Ebook:** `/search`
+`GET /`
+- **Description**: Basic health check endpoint.
+- **Response**: Hello, World!
 
-Parameters:
-- `ebook`: Search term (required)
-- `page`: Page number (optional, default is 1)
+`GET /search`
+- **Description**: Search for eBooks by name.
+- **Query Parameters**:
+  - **ebook**: The name of the eBook to search for.
+  - **page**: (Optional) The page number of search results to retrieve. Defaults to 1.
+- **Response**: A JSON array of books with details such as author, title, URL, pages, size, language, category, and extension.
+
+`GET /download`
+
+- **Description**: Retrieve download information for a specific eBook.
+- **Query Parameters**:
+  - `ebook`: The URL of the eBook to get download information for.
+- **Response**: A JSON object with download links and details such as description, title, author, cloudflare link, IPFSIO link, and thumbnail.
 
 Example:
 
@@ -58,9 +85,13 @@ Output:
 ```json
 [
   {
-    "author": "John Kiriamiti",
+    "authors": [
+      "John Kiriamiti"
+    ],
     "title": "My Life with a Criminal: Milly's Story",
     "url": "http://library.lol/main/385AB0FBDD37033748A9E26F5BFD2D1F",
+    "publisher": "Nairobi : Spear Books",
+    "year": "1989",
     "pages": "",
     "size": "361 Kb",
     "language": "English",
@@ -70,7 +101,8 @@ Output:
 ]
 ```
 
-**Download Ebook:** `/download`
+
+2. **Download Ebook:** `/download`
 
 Parameters:
 - `ebook`: Ebook URL (required)
@@ -91,23 +123,6 @@ Output:
   "thumbnail": "http://library.lol/covers/3532000/385ab0fbdd37033748a9e26f5bfd2d1f-g.jpg"
 }
 ```
-
-## Running as a microservice
-To run the application as a microservice, build and deploy it to your preferred cloud or container platform. Below are basic steps using Docker:
-
-1. **Build the image:**
-```bash
-docker build -t libgen .
-```
-
-2. **Run the image:**
-```bash
-docker run -p 8080:8080 libgen
-```
-Replace `-p 8080:8080` with your preferred port mapping.
-
-3. **Test the endpoints:**
-Test the endpoints using cURL or a similar tool. Refer to the Usage section for examples.
 
 ## Dependencies
 

@@ -57,23 +57,16 @@ Replace `-p 8080:8080` with your preferred port mapping.
 
 The script exposes the following endpoints:
 
-`GET /`
-- **Description**: Basic health check endpoint.
-- **Response**: Hello, World!
+1. `GET /`
+    - **Description**: Basic health check endpoint.
+    - **Response**: Hello, World!
 
-`GET /search`
-- **Description**: Search for eBooks by name.
-- **Query Parameters**:
-  - **ebook**: The name of the eBook to search for.
-  - **page**: (Optional) The page number of search results to retrieve. Defaults to 1.
-- **Response**: A JSON array of books with details such as author, title, URL, pages, size, language, category, and extension.
-
-`GET /download`
-
-- **Description**: Retrieve download information for a specific eBook.
-- **Query Parameters**:
-  - `ebook`: The URL of the eBook to get download information for.
-- **Response**: A JSON object with download links and details such as description, title, author, cloudflare link, IPFSIO link, and thumbnail.
+2. `GET /search`
+    - **Description**: Search for eBooks by name.
+    - **Query Parameters**:
+      - **ebook**: The name of the eBook to search for.
+      - **page**: (Optional) The page number of search results to retrieve. Defaults to 1.
+    - **Response**: A JSON array of books with details such as author, title, URL, pages, size, language, category, and extension.
 
 Example:
 
@@ -102,10 +95,13 @@ Output:
 ```
 
 
-2. **Download Ebook:** `/download`
+3. `GET /download`
 
-Parameters:
-- `ebook`: Ebook URL (required)
+    - **Description**: Retrieve download information for a specific eBook.
+    - **Query Parameters**:
+      - `ebook`: The URL of the eBook to get download information for.
+    - **Response**: A JSON object with download links and details such as description, title, author, cloudflare link, IPFSIO link, and thumbnail.
+
 
 Example:
 ```bash
@@ -123,6 +119,7 @@ Output:
   "thumbnail": "http://library.lol/covers/3532000/385ab0fbdd37033748a9e26f5bfd2d1f-g.jpg"
 }
 ```
+
 
 ## Dependencies
 

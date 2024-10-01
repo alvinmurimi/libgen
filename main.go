@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	LIBGEN_URL = "https://libgen.rs/"
+	LIBGEN_URL = "https://libgen.is/"
 )
 
 type Book struct {

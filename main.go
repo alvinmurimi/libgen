@@ -6,14 +6,25 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/gin-gonic/gin"
 	"github.com/parnurzeal/gorequest"
 )
 
-const (
-	LIBGEN_URL = "https://libgen.is/"
+var (
+	// LibGen mirrors
+	LIBGEN_MIRRORS = []string{
+		"https://libgen.is/",
+		"https://libgen.st/",
+		"https://libgen.rs/",
+	}
+	activeURL     string
+	lastCheckTime time.Time
+	mutex         sync.RWMutex
+	checkInterval = 5 * time.Minute
 )
 
 type Book struct {
@@ -40,6 +51,61 @@ type DownloadInfo struct {
 	Cloudflare  string `json:"cloudflare"`
 	IPFSIO      string `json:"ipfsio"`
 	Thumbnail   string `json:"thumbnail"`
+}
+
+// findActiveMirror checks all mirrors and returns the first responding one
+func findActiveMirror() string {
+	type result struct {
+		url    string
+		active bool
+	}
+	results := make(chan result, len(LIBGEN_MIRRORS))
+
+	for _, mirror := range LIBGEN_MIRRORS {
+		go func(url string) {
+			resp, _, errs := gorequest.New().
+				Timeout(10 * time.Second).
+				Get(url).
+				End()
+			
+			results <- result{
+				url:    url,
+				active: len(errs) == 0 && resp != nil && resp.StatusCode == http.StatusOK,
+			}
+		}(mirror)
+	}
+
+	for i := 0; i < len(LIBGEN_MIRRORS); i++ {
+		if r := <-results; r.active {
+			return r.url
+		}
+	}
+
+	// Fallback to first mirror if none respond
+	return LIBGEN_MIRRORS[0]
+}
+
+// getActiveURL returns the currently active mirror, checking periodically
+func getActiveURL() string {
+	mutex.RLock()
+	if time.Since(lastCheckTime) < checkInterval && activeURL != "" {
+		defer mutex.RUnlock()
+		return activeURL
+	}
+	mutex.RUnlock()
+
+	mutex.Lock()
+	defer mutex.Unlock()
+
+	// Double-check after acquiring write lock
+	if time.Since(lastCheckTime) < checkInterval && activeURL != "" {
+		return activeURL
+	}
+
+	activeURL = findActiveMirror()
+	lastCheckTime = time.Now()
+	log.Printf("Active LibGen mirror: %s", activeURL)
+	return activeURL
 }
 
 func extractBookInfo(s *goquery.Selection) Book {
@@ -161,11 +227,38 @@ func isISBN13(s string) bool {
 }
 
 func searchEbook(name, page string) ([]Book, error) {
-	url := fmt.Sprintf("%ssearch.php?req=%s&page=%s", LIBGEN_URL, strings.ReplaceAll(name, " ", "+"), page)
+	url := fmt.Sprintf("%ssearch.php?req=%s&page=%s", 
+		getActiveURL(), 
+		strings.ReplaceAll(name, " ", "+"), 
+		page,
+	)
 
-	resp, body, errs := gorequest.New().Get(url).End()
+	resp, body, errs := gorequest.New().
+		Timeout(30 * time.Second).
+		Get(url).
+		End()
+		
 	if len(errs) > 0 || resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to fetch URL: %v", errs)
+		// If the request fails, force a mirror refresh and try once more
+		mutex.Lock()
+		activeURL = ""
+		lastCheckTime = time.Time{}
+		mutex.Unlock()
+		
+		url = fmt.Sprintf("%ssearch.php?req=%s&page=%s", 
+			getActiveURL(), 
+			strings.ReplaceAll(name, " ", "+"), 
+			page,
+		)
+		
+		resp, body, errs = gorequest.New().
+			Timeout(30 * time.Second).
+			Get(url).
+			End()
+			
+		if len(errs) > 0 || resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("failed to fetch URL after retry: %v", errs)
+		}
 	}
 
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(body))
@@ -189,7 +282,11 @@ func getDownload(url string) (*DownloadInfo, error) {
 		return nil, fmt.Errorf("empty URL provided")
 	}
 
-	resp, body, errs := gorequest.New().Get(url).End()
+	resp, body, errs := gorequest.New().
+		Timeout(30 * time.Second).
+		Get(url).
+		End()
+		
 	if len(errs) > 0 || resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("failed to fetch URL: %v", errs)
 	}
@@ -241,6 +338,7 @@ func main() {
 	r.GET("/search", handleSearch)
 	r.GET("/download", handleDownload)
 
+	log.Printf("Starting server with the following mirrors: %v", LIBGEN_MIRRORS)
 	r.Run(":8080")
 }
 
